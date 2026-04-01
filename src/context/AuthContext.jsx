@@ -23,7 +23,6 @@ export function AuthProvider({ children }) {
   const [userData, setUserData] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // LOGIN
   const login = async (email, password) => {
     try {
       return await signInWithEmailAndPassword(
@@ -44,14 +43,40 @@ export function AuthProvider({ children }) {
     }
   };
 
-  // LOGOUT
   const logout = async () => {
     setUser(null);
     setUserData(null);
     return signOut(auth);
   };
 
-  // AUTH STATE LISTENER
+  // Auto logout after user leaves app for 30 seconds
+  useEffect(() => {
+    let logoutTimer;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden && auth.currentUser) {
+        logoutTimer = setTimeout(async () => {
+          try {
+            await signOut(auth);
+            setUser(null);
+            setUserData(null);
+          } catch (error) {
+            console.error('Auto logout failed:', error);
+          }
+        }, 30000);
+      } else {
+        clearTimeout(logoutTimer);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearTimeout(logoutTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setAuthLoading(true);
@@ -74,7 +99,6 @@ export function AuthProvider({ children }) {
           return;
         }
 
-        // 🔥 QUERY FIRESTORE (SAFE VERSION FOR YOUR CURRENT STRUCTURE)
         const q = query(
           collection(db, 'users'),
           where('email', '==', normalizedEmail)

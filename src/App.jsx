@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
 import { calculateLoanEligibilityScore } from './utils/loanScoring';
 import { uploadFileToStorage } from './utils/fileUpload';
 import {
@@ -54,45 +52,46 @@ import './App.css';
 
 function App() {
   const { user, login } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState(null);
+  const [error, setError] = useState('');
+
+  const isLocked = lockedUntil && Date.now() < lockedUntil;
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
 
-    try {
-      await login(email, password);
-
-      await addDoc(collection(db, 'teller_sessions'), {
-        tellerEmail: email.trim().toLowerCase(),
-        tellerName: email.trim().toLowerCase(),
-        branchName: '',
-        branchId: '',
-        loginTime: serverTimestamp(),
-        logoutTime: null,
-        active: true,
-        dateKey: new Date().toISOString().split('T')[0],
-      });
-    } catch (err) {
-      console.error('Login Error:', err);
-
-      const message = String(err?.message || '').toLowerCase();
-
-      if (message.includes('network')) {
-        alert('Network Error: Please check your internet connection and try again.');
-      } else if (message.includes('invalid email or password')) {
-        alert('Access Denied: The password or email is incorrect.');
-      } else if (message.includes('user-not-found')) {
-        alert('Access Denied: This staff email is not registered.');
-      } else {
-        alert('System Error: ' + (err?.message || 'Login failed.'));
-      }
+    if (isLocked) {
+      const secondsLeft = Math.ceil((lockedUntil - Date.now()) / 1000);
+      setError(`Too many failed attempts. Try again in ${secondsLeft} seconds.`);
+      return;
     }
 
-    setLoading(false);
+    try {
+      setLoading(true);
+      setError('');
+      await login(email, password);
+      setFailedAttempts(0);
+      setLockedUntil(null);
+    } catch (err) {
+      const nextAttempts = failedAttempts + 1;
+      setFailedAttempts(nextAttempts);
+
+      if (nextAttempts >= 5) {
+        const lockTime = Date.now() + 5 * 60 * 1000;
+        setLockedUntil(lockTime);
+        setError('Too many failed attempts. Please wait 5 minutes before trying again.');
+      } else {
+        setError(err.message || 'Login failed');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const StaffLoginScreen = (
@@ -224,6 +223,12 @@ function App() {
                   </div>
                 </div>
 
+                {error && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+                    {error}
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={loading}
@@ -268,15 +273,12 @@ function App() {
   return (
     <Router>
       <Routes>
-        {/* Public routes */}
         <Route path="/customer-signup" element={<CustomerSignup />} />
         <Route path="/customer-login" element={<CustomerLogin />} />
         <Route path="/online-loan-application" element={<OnlineLoanApplication />} />
 
-        {/* Shared staff landing */}
         <Route path="/" element={user ? <MainDashboard /> : StaffLoginScreen} />
 
-        {/* General protected routes */}
         <Route
           path="/category/:id"
           element={
@@ -295,7 +297,6 @@ function App() {
           }
         />
 
-        {/* Financial office */}
         <Route
           path="/workspace/finance"
           element={
@@ -359,7 +360,6 @@ function App() {
           }
         />
 
-        {/* Remittance office */}
         <Route
           path="/workspace/remittance"
           element={
@@ -369,7 +369,6 @@ function App() {
           }
         />
 
-        {/* Forex office */}
         <Route
           path="/foreign-exchange"
           element={
@@ -379,7 +378,6 @@ function App() {
           }
         />
 
-        {/* Info / front desk office */}
         <Route
           path="/workspace/payments"
           element={
@@ -407,7 +405,6 @@ function App() {
           }
         />
 
-        {/* Admin routes */}
         <Route
           path="/admin-hub"
           element={
@@ -507,7 +504,6 @@ function App() {
           }
         />
 
-        {/* Shared staff tools */}
         <Route
           path="/staff-profile"
           element={
@@ -526,7 +522,6 @@ function App() {
           }
         />
 
-        {/* Temporary utilities */}
         <Route
           path="/fileupload"
           element={
@@ -561,7 +556,6 @@ function App() {
           }
         />
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
